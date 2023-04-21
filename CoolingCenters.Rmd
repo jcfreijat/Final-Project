@@ -1,0 +1,127 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+Data from:
+https://ephtracking.cdc.gov/DataExplorer/?c=35&i=88&m=-1
+
+
+Load libraries
+```{r}
+library(tidyverse)
+library(lubridate)
+library(forcats)
+library(ggplot2)
+library(dplyr)
+library(janitor)
+library(maps)
+library(sf)
+library(leaflet)
+```
+
+Load data
+```{r}
+coolingcenters <- read_csv("data/Missouri_Cooling_Centers_Sites.csv")
+heathospitalizations <- read_csv("data/heat.csv")
+```
+
+Clean & organize coolingcenters data 
+```{r}
+coolingcentersclean <- coolingcenters %>% 
+  separate(Location, sep=", ", into=c("latitude", "longitude"))
+
+coolingcentersclean <- coolingcentersclean %>%
+ mutate(lat = str_replace(latitude, "[(]", ""))
+
+coolingcentersclean <- coolingcentersclean %>%
+ mutate(long = str_replace(longitude, "[)]", ""))
+
+coolingcentersclean <- coolingcentersclean %>% mutate(region = case_when(
+  grepl("MO", state, ignore.case=T) ~ "missouri",
+  grepl("IL", state, ignore.case=T) ~ "illinois",
+  grepl("KS", state, ignore.case=T) ~ "kansas"))
+
+coolingcentersclean <- subset (coolingcentersclean, select = -latitude)
+coolingcentersclean <- subset (coolingcentersclean, select = -longitude)
+
+coolingcentersclean$lat <- as.numeric(coolingcentersclean$lat)
+coolingcentersclean$long <- as.numeric(coolingcentersclean$long)
+
+coolingcentersclean <- clean_names(coolingcentersclean)
+```
+Clean & organize heat data
+```{r}
+heathospitalizations <- heathospitalizations %>% 
+  filter(State=="Missouri")
+
+heathospitalizations <- clean_names(heathospitalizations)
+```
+Load map data
+```{r}
+states <- map_data("county") %>% filter(region ==  "missouri" | region == "illinois" | region == "kansas")
+```
+Create static map
+```{r}
+ggplot(states, aes(x = long, y = lat, group = group)) + 
+  geom_polygon(fill = "black", color = "lightgray", linewidth=.05) + 
+  geom_point(data=coolingcentersclean, aes(group = NULL), alpha=.5, size=.7, color="purple") +
+  theme_void() +
+  scale_color_manual(name = NULL)
+```
+Create interactive map
+```{r}
+leaflet() %>% 
+    addProviderTiles("CartoDB.DarkMatter") %>%
+    addCircleMarkers(
+    data = coolingcentersclean,
+    color = "purple",
+    opacity = 0.5,
+    radius = 1)
+```
+Make another map
+
+```{r}
+coolingcenterschloro <- coolingcentersclean %>% 
+  group_by(county, state) %>% 
+  count(county) %>% 
+  arrange(desc(n))  
+  
+```
+
+
+```{r}
+ggplot(states, aes(x = long, y = lat, group = group)) + 
+  geom_polygon(fill = "black", color = "lightgray", linewidth=.05) + 
+  geom_sf(aes(fill=coolingcenterschloro), color="white") +
+  theme_void() +
+  scale_color_manual(name = NULL)
+```
+
+Make a chart
+```{r}
+
+```
+
+
+Some basic analysis
+```{r}
+coolingcentersclean %>% 
+  filter(transportation == "Yes")
+#No centers provide transportation
+
+coolingcentersclean %>% 
+  filter(ada_accessible == "No")
+#All centers are ADA accessible
+
+coolingcentersclean %>% 
+  group_by(county) %>% 
+  count(county) %>% 
+  arrange(desc(n))
+#Jackson County has the most cooling centers followed by St. Louis county and then Madison
+
+coolingcentersclean %>% 
+  filter(county == "Boone")
+#Boone County has 6 cooling centers
+
+```
+
