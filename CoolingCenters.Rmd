@@ -2,108 +2,213 @@
 title: "R Notebook"
 output: html_notebook
 ---
+
+# **Advanced Data Journalism Final Project**
+
 Data from:
-https://ephtracking.cdc.gov/DataExplorer/?c=35&i=88&m=-1
 
+<https://data.mo.gov/Health/Missouri-Cooling-Centers-Sites/ks2s-yguy>
 
-Load libraries
+<https://ephtracking.cdc.gov/DataExplorer/?c=35&i=88&m=-1>
+
+<https://public.tableau.com/app/profile/samantha2462/viz/shared/437ZHKXJZ>
+
+<https://moboscoc.org/resources/data/point-in-time-count-reports/>
+
+### Step 1: Load libraries
+
 ```{r}
 library(tidyverse)
 library(lubridate)
-library(forcats)
 library(ggplot2)
 library(dplyr)
 library(janitor)
 library(maps)
-library(sf)
 library(leaflet)
+library(ggiraph)
+library(plotly)
+
+#Animation Libraries
+#I opted not to animate data because none of the data I collected seemed well-suited for animating over time. I did, however, include the code I used to try and animate the bar graph at the end of the assignment.
+
+library(gganimate)
+library(sp)
+library(viridis)
+library(htmltools)
+library(gapminder)
+library(gifski)
+library(png)
+library(tmap)
+
+
 ```
 
-Load data
+### Step 2: Load data
+
+We will be using three data sets. One contains the coordinates and details for cooling centers serving Missouri and another contains heat-related hospitalizations over the last several years. The last one contains information about people experiencing homelessness at a specific point in time from the U.S. Department of Housing and Urban Development.
+
 ```{r}
-coolingcenters <- read_csv("data/Missouri_Cooling_Centers_Sites.csv")
-heathospitalizations <- read_csv("data/heat.csv")
+coolingcenters <- read_csv("Final Project/Missouri_Cooling_Centers_Sites.csv")
+
+heathospitalizations <- read_csv("Final Project/heatrate.csv")
+
+hud_mo <- read_csv("Final Project/HUDmo.csv")
 ```
 
-Clean & organize coolingcenters data 
+### Step 3: Clean data
+
+Clean & organize cooling centers data.
+
+Our data needs to be properly --- and specifically --- formatted so it can be easily visualized.
+
 ```{r}
+#First, I'm separating the latitude and longitude into separate boxes. 
 coolingcentersclean <- coolingcenters %>% 
   separate(Location, sep=", ", into=c("latitude", "longitude"))
 
+#I'm also cleaning up these boxes by removing the parentheses from them.
 coolingcentersclean <- coolingcentersclean %>%
  mutate(lat = str_replace(latitude, "[(]", ""))
 
 coolingcentersclean <- coolingcentersclean %>%
  mutate(long = str_replace(longitude, "[)]", ""))
 
+#I'm going to change the state abbreviations to their names so it will be easier to combine with the states data.
 coolingcentersclean <- coolingcentersclean %>% mutate(region = case_when(
   grepl("MO", state, ignore.case=T) ~ "missouri",
   grepl("IL", state, ignore.case=T) ~ "illinois",
   grepl("KS", state, ignore.case=T) ~ "kansas"))
 
+#I'm going to remove the improperly formatting latitude and longitude from the dataset. 
 coolingcentersclean <- subset (coolingcentersclean, select = -latitude)
 coolingcentersclean <- subset (coolingcentersclean, select = -longitude)
 
+#We'll need our coordinates to be numbers so we can plot them.
 coolingcentersclean$lat <- as.numeric(coolingcentersclean$lat)
 coolingcentersclean$long <- as.numeric(coolingcentersclean$long)
 
+#Lastly, I'll be cleaning the names with janitor. 
 coolingcentersclean <- clean_names(coolingcentersclean)
 ```
-Clean & organize heat data
-```{r}
-heathospitalizations <- heathospitalizations %>% 
-  filter(State=="Missouri")
 
+Clean & organize heat data
+
+```{r}
+#This dataset is relatively clean, so I'm just going to clean the names and then remove the column at the end.
 heathospitalizations <- clean_names(heathospitalizations)
+heathosptializations <- tolower(heathospitalizations$state)
+
+heathospitalizations <- subset (heathospitalizations, select = -x6)
 ```
-Load map data
+
+Clean & organize HUD data
+
 ```{r}
-states <- map_data("county") %>% filter(region ==  "missouri" | region == "illinois" | region == "kansas")
+#This dataset is relatively clean, so I'm just going to clean the names and rename the unsheltered column for the sake of ease.
+hud_mo <- clean_names(hud_mo)
+hud_mo <- hud_mo %>% rename(unsheltered_total = measure_values)
 ```
-Create static map
+
+### Step 4: Load map data
+
 ```{r}
-ggplot(states, aes(x = long, y = lat, group = group)) + 
-  geom_polygon(fill = "black", color = "lightgray", linewidth=.05) + 
-  geom_point(data=coolingcentersclean, aes(group = NULL), alpha=.5, size=.7, color="purple") +
+states <- map_data("state") %>% filter(region=="missouri" | region == "illinois" | region == "kansas")
+
+statescounties <- map_data("county")
+
+mocounties <- map_data("county") %>% filter(region ==  "missouri")
+```
+
+### Step 5: Create custom interactive dot map
+
+By using county-level data from the maps package and plotly, we can create our own custom interactive dot map.
+
+```{r}
+dotmap_ <- ggplot(statescounties, aes(x = long, y = lat, group = group)) +
+  geom_polygon(fill = "#F8F9F9", color = "darkgray", linewidth=.1) +
+  geom_point(data=coolingcentersclean, aes(group = NULL, text = paste("Location:", facility)),   alpha=.5, size=.7, color="#EE9253") +   
+  coord_fixed(1.3) +
   theme_void() +
-  scale_color_manual(name = NULL)
+  labs(title="Cooling Centers in Missouri in 2022", caption = "Data from data.mo.gov") + theme_void() 
+
+dotmap <- ggplotly(dotmap_, tooltip = "text")
+
 ```
-Create interactive map
+
+### Step 6: Create interactive dot map with leaflet
+
+Leaflet is a simpler way to plot data interactively.
+
 ```{r}
-leaflet() %>% 
-    addProviderTiles("CartoDB.DarkMatter") %>%
+interactivedotmap <- leaflet() %>% 
+    addProviderTiles(providers$CartoDB.Positron) %>%
     addCircleMarkers(
     data = coolingcentersclean,
-    color = "purple",
+    color = "#EE9253",
     opacity = 0.5,
-    radius = 1)
-```
-Make another map
-
-```{r}
-coolingcenterschloro <- coolingcentersclean %>% 
-  group_by(county, state) %>% 
-  count(county) %>% 
-  arrange(desc(n))  
-  
+    radius = 1,
+    ~long, ~lat, popup = ~htmlEscape(facility))
 ```
 
+### Step 7: Create an interactive bar graph
+
+Similar to how we created a custom interactive dot map, we can do the same for bar graphs.
 
 ```{r}
-ggplot(states, aes(x = long, y = lat, group = group)) + 
-  geom_polygon(fill = "black", color = "lightgray", linewidth=.05) + 
-  geom_sf(aes(fill=coolingcenterschloro), color="white") +
+#I'm going to create a tooltip first to make the bar graph interactive. 
+heathospitalizations <- heathospitalizations %>% mutate(
+    tooltip_text = paste0(year, " - ", value, "%"))
+
+colors <- c("National Average" = "red")
+
+
+#Now, I'm going to use ggplot to create the bar graph.
+bar_graph_ <- heathospitalizations %>% 
+  filter(state=="Missouri") %>% 
+  ggplot(aes(x=year, y=value, tooltip = tooltip_text, data_id = state)) + 
+  theme_minimal() +
+  geom_col_interactive(width=.7, size = 0.2, fill="#EE9253") + 
+  geom_hline_interactive(aes(yintercept = 2.010133, tooltip = "National Average: 2.010133%", linetype="National Average")) +
+        scale_linetype_manual(name = "", values = "solid") +
+        scale_size_manual(aes(size=.05)) +
+theme(axis.text=element_text(size = 7), axis.title=element_text(size=7), title=element_text(size=7), legend.position = "bottom", legend.text = element_text(size=5), legend.title = element_text(size=7)) +
+labs(title = "Percentage of heat-related illness hospitalizations in Missouri per 100k people 2000-2020", subtitle = "Data from CDC") +
+ylab("Percentage of heat hospitalizations") +
+xlab("Year")
+
+#Girafe will let us make the graph interactive.
+bar_graph <- girafe(ggobj = bar_graph_, width_svg = 5, height_svg = 3, gg_hline1)
+
+```
+
+### Step 8: Create an interactive chloropleth graph
+
+```{r}
+hud_mo <- hud_mo %>% 
+ mutate(county = str_replace(county, '\\.', ''))
+
+hud_states <- 
+  hud_mo %>% 
+  mutate(county = str_to_lower(county)) %>% 
+  right_join(mocounties, by = c("county" = "subregion"))
+
+hud_states <- hud_states %>% mutate(
+    tooltip_text = paste0(county, " - ", unsheltered_total))
+
+chloro_map_ <-ggplot(hud_states, aes(x = long, y = lat, group = group, fill = unsheltered_total, tooltip = tooltip_text, data_id = county)) +
   theme_void() +
-  scale_color_manual(name = NULL)
+  geom_polygon_interactive(colour = "white", linewidth = .1) +
+  coord_fixed(1.3) +
+  scale_fill_continuous(low = '#F9E79F',high = '#D4AC0D', n.breaks=10, name="Total unsheltered individuals") +
+  labs(title = "Total people who are unsheltered in Missouri counties — 2019",subtitle = "Data from CDC") +
+  theme(title=element_text(size=7), legend.position = "right", legend.text = element_text(size=5), legend.title = element_text(size=7))
+
+chloro_map <- girafe(ggobj = chloro_map_, width_svg = 5, height_svg = 3)
+
 ```
 
-Make a chart
-```{r}
+### Step 9: Do some basic analysis
 
-```
-
-
-Some basic analysis
 ```{r}
 coolingcentersclean %>% 
   filter(transportation == "Yes")
@@ -123,5 +228,90 @@ coolingcentersclean %>%
   filter(county == "Boone")
 #Boone County has 6 cooling centers
 
+coolingcentersclean %>% 
+  filter(grepl("sun", hours_of_operation, ignore.case=T))
+#58 centers are open on Sundays
+
+heathospitalizations %>% 
+  arrange(desc(value))
+#California had the highest heat-related hospitalization rate in 2020; Missouri had the sixth highest rate in 2011 at 7.6.
+
+heathospitalizations %>% 
+  filter(state=="Missouri") %>% 
+  arrange(desc(value))
+#Missouri had its highest number of heat-related hospitalizations in 2011
+
+heathospitalizations %>% 
+  summarise(average = mean(value))
+#The average percentage of heat-related illness hospitalizations from 2000 to 2021 using availble data was 2.010133%.
+
+heathospitalizations %>% 
+  group_by(state) %>% 
+  summarise(average = mean(value)) %>% 
+  arrange(desc(average))
+#Missouri has the second highest rate of the data reported. 
+
+
 ```
 
+### Story Package
+
+**Important statistics and data analysis to include in the story:**
+
+In the last two decades, Missouri ranks in the top ten out of reporting states for the highest rate of heat-related illnesses per 100,000 people. In 2011, the rate in Missouri reached 7.6%, ranking it number 6 behind Arizona.
+
+Missouri currently reports 538 cooling centers. 58 of those cooling centers are open on Sundays.
+
+**Graphs to include in the story:**
+
+```{r}
+dotmap
+```
+
+```{r}
+interactivedotmap
+```
+
+```{r}
+bar_graph
+```
+
+```{r}
+chloro_map
+```
+
+### Methodology:
+
+Three data sets were used and analyzed in this story package.
+
+The first data set documents the locations of cooling centers in the state of Missouri. This data is from 2022 and was collected from data.mo.gov. It is reported by the Missouri Department of Health & Senior Services. The data only includes cooling centers that are reported to the Missouri Department of Health & Senior Services, and therefore may exclude some cooling centers.
+
+The second data set documents the percent of age-adjusted heat-related illness hospitalizations in the United States per 100,000 people. It was accessed from the Centers for Disease Control. It is important to note that all states report data every year. In my analysis, I included all states' data. In creating the bar chart, however, I included filtered for data from only Missouri, for all years available from 2000 to 2021.
+
+The third data set documents the number of unsheltered individuals experiencing homelessness in 2019, which is the most recent data available for download. It comes from the Missouri Balance of State Continua of Care, as required by the Missouri Department of Health & Senior Services. Some counties are not reported in the data. In the chart, these counties are listed with data as "N/A".
+
+*Animation code:*
+
+This code may take a while to load, and requires rendering packages to show the animation.
+
+```{r}
+animatedgraph <- heathospitalizations %>% 
+  filter(state=="Missouri" | state=="Arizona") %>% 
+  ggplot(aes(x=state, y=value, fill=state)) + 
+  theme_minimal() +
+  theme(axis.text=element_text(size = 7), axis.title=element_text(size=7), title=element_text(size=7), legend.position = "bottom", legend.text = element_text(size=5), legend.title = element_text(size=7)) +
+labs(title = "Percentage of heat-related illness hospitalizations in Missouri and Arizona per 100k people 2000-2020", subtitle = "Data from CDC") +
+ylab("Percentage of heat hospitalizations") +
+xlab("Year")
+
+ animatedgraph + geom_bar(stat='identity') +
+  transition_states(
+    year,
+    transition_length = 20,
+    state_length = 1) +
+  ease_aes('sine-in-out') +
+     transition_time(year) +
+labs(title = "Year: {frame_time}")
+
+
+```
